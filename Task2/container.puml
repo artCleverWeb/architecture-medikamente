@@ -1,0 +1,261 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_TOP_DOWN()
+LAYOUT_WITH_LEGEND()
+'skinparam linetype ortho
+
+
+Person_Ext("patient", "Пациент", "Пациент")
+
+Person("administrator", "Администратор", "Сотрудник ресепшен")
+Person("doctor", "Врач", "Специалист-медик")
+Person("buch", "Бухгалтер", "Бухгалтер")
+Person("stock", "Сотрудник склада", "Сотрудник склада")
+Person("cash", "Кассир", "Кассир")
+
+Container_Ext(payment_system, "Платежная система", "Software System", "Платежная система")
+Container_Ext(lab, "Лаборатория", "Software System", "Медицинская лаборатория")
+
+
+
+System_Boundary(system, "Система компании «Медикаменте»") {
+
+    System(ext_gateway, "Прокси сервер", "Внешний nginx сервер")
+
+    Container(web_patient, "Веб портал для пациентов", "React")
+
+    System(kkm_system, "Контрольно-кассовая машина", "Software System")
+    System(1_buch_system, "1С Бухгалтерия предприятия", "Software System")
+    note bottom of 1_buch_system
+        В системе хранятся конфиденциальные и финансовые данные.
+        Срок хранения: 5 лет.
+        Шифрование при передачи - TLS
+        Шифрования данных.
+        Разграничение прав доступа осуществляется на основе политики AD и внутренними механизмами системы
+    end note
+
+    System(1_stock_system, "1С торговля и склад", "Складская система учета")
+    note bottom of 1_stock_system
+        В системе хранятся конфиденциальные и финансовые данные.
+        Срок хранения: 5 лет.
+        Шифрование при передачи - TLS
+        Шифрования данных.
+        Разграничение прав доступа осуществляется на основе политики AD и внутренними механизмами системы
+    end note
+
+    System_Boundary(payment_service_system, "Сервис оплат"){
+        Container(payment_service, "Сервис оплат", "Python", "Хранении информации о транзакциях")
+        ContainerDb(payment_service_db, "База данных", "PostgresSQL, AES-256", "База данных Сервиса оплат")
+        Rel(payment_service, payment_service_db, "Запись \ Чтение данных", "SQL \ TCP")
+    }
+
+    note bottom of payment_service_system
+        Сервис хранит информацию о финансовых транзакциях клиента:
+            - ФИО
+            - Номер телефона \ email
+            - Список услуг
+            - Сумма оплаты
+            - Атрибуты транзакции
+        Срок хранения: 5 лет.
+        Хранение в БД в зашифрованном виде по алгоритму AES 256.
+        Шифрование при передачи - TLS
+        Доступ на основе ABAC.
+        - Администратор имеет полный доступ к информации
+        - Пациент имеет доступ к PII и FINU
+        - Сотрудники и мед. персонал на основе ABAC и тегов PII и FINU
+    end note
+
+    System_Boundary(schedule_service_system, "Сервис расписания и записи к врачу"){
+        Container(schedule_service, "Backend сервиса", "Python", "Хранении информации расписании врачей и записи пациентов к врачам")
+        ContainerDb(schedule_service_db, "База данных", "PostgresSQL, AES-256", "База данных расписания и записи к врачу")
+        Rel(schedule_service, schedule_service_db, "Запись \ Чтение данных", "SQL \ TCP")
+    }
+
+    note bottom of schedule_service_system
+        Сервис хранит информацию о расписании врачей и записей пациентов:
+            - Расписание врачей
+            - ФИО пациента
+            - Номер телефона пациента
+            - Дата \ время \ специалист к которому записан пациент
+        Срок хранения: 1 год.
+        Хранение в БД в зашифрованном виде по алгоритму AES 256.
+        Шифрование при передачи - TLS
+        Доступ на основе ABAC.
+        - Администратор имеет полный доступ к информации
+        - Пациент имеет доступ к PII
+        - Сотрудники и мед. персонал на основе ABAC, включая разграничение с привязкой пациентов к врачам к PII.
+    end note
+
+    System_Boundary(medical_tests_system, "Сервис анализов пациентов"){
+        Container(medical_tests_service, "Backend сервиса", "Python", "Хранении информации об анализах пациентов")
+        Container(integration_medical_tests_service, "Сервис интеграции с внешним сервисом лаборатории", "Python", "Выполняет токенизацию и обфускации данных")
+        ContainerDb(medical_tests_service_db, "База данных", "PostgresSQL, AES-256", "База данных анализов пациентов")
+        Rel(integration_medical_tests_service, medical_tests_service_db, "Запись \ Чтение данных", "SQL \ TCP")
+        Rel(medical_tests_service, medical_tests_service_db, "Запись \ Чтение данных", "SQL \ TCP")
+    }
+
+    note bottom of medical_tests_system
+        Сервис хранит информацию о результатах анализов пациентов:
+            - Идентификатор пациента
+            - Токен анализа
+            - Медицинские данные в результатах анализа
+        Срок хранения: 3 года.
+        Хранение в БД в зашифрованном виде по алгоритму AES 256.
+        Шифрование при передачи - TLS
+        Доступ на основе ABAC.
+        - Администратор имеет полный доступ к информации
+        - Пациент имеет доступ к PII и PHI
+        - Врачи имеют доступ к PII и PHI на основе ABAC, включая разграничение с привязкой пациентов к врачам.
+    end note
+
+    System_Boundary(patient_service_system, "Сервис пациентов"){
+        Container(patient_service, "Backend сервиса пациентов", "Python", "Хранения информации профилей пациентов")
+        ContainerDb(patient_service_db, "База данных", "PostgresSQL", "База данных сервиса пациентов")
+        Rel(patient_service, patient_service_db, "Запись \ Чтение данных", "SQL \ TCP")
+    }
+
+    note bottom of patient_service_system
+        Сервис хранит информацию о профилях пациентов:
+            - ФИО
+            - Номер телефона
+            - Email
+            - Дата рождения
+            - Адрес проживания
+            - Иные данные пациента
+        Срок хранения: 1 год с момента последней аутентификации.
+        Удаление по требованию пациента
+        Доступ на основе ABAC.
+        - Администратор имеет полный доступ к информации
+        - Пациент имеет доступ к PII
+    end note
+
+    System_Boundary(patient_card_system, "Сервис медицинских карточек пациентов"){
+        Container(patient_card_service, "Backend сервиса пациентов", "Python", "Хранения медицинских карточек пациентов")
+        ContainerDb(patient_card_service_db, "База данных", "PostgresSQL, AES-256", "База данных сервиса медицинских карточек пациентов")
+        Rel(patient_card_service, patient_card_service_db, "Запись \ Чтение данных", "SQL \ TCP")
+    }
+
+    note bottom of patient_card_system
+        Сервис хранит информацию о расписании врачей и записей пациентов
+        Срок хранения: 3 года.
+        Хранение в БД в зашифрованном виде по алгоритму AES 256.
+        Шифрование при передачи - TLS
+        Доступ на основе ABAC.
+        - Администратор имеет полный доступ к информации
+        - Пациент имеет доступ к PII и PHI
+        - Врачи имеют доступ к PII и PHI на основе ABAC, включая разграничение с привязкой пациентов к врачам.
+    end note
+
+    System_Boundary(crm_system, "CRM система компании «Медикаменте»"){
+        Container(crm_service, "Backend CRM системы компании «Медикаменте»", "Python", "Сбор данных и аналитики о клиентах компании")
+        ContainerDb(crm_service_db, "База данных", "PostgresSQL, AES-256", "База данных CRM система компании «Медикаменте»")
+        Rel(crm_service, crm_service_db, "Запись \ Чтение данных", "SQL \ TCP")
+    }
+
+    note bottom of crm_system
+        Срок хранения: 3 года.
+        Хранение в БД в зашифрованном виде по алгоритму AES 256.
+        Шифрование при передачи - TLS
+        Доступ на основе ABAC.
+        - Администратор имеет полный доступ к информации
+        - Сотрудники имеют доступ к PII на основе ABAC.
+    end note
+
+    System_Boundary(file_system, "Сервис хранения сканов \ документов пациентов"){
+        Container(file_service, "Backend сервиса хранения сканов \ документов пациентов", "Python", "Токенезация и шифрования документов перед помещением в файловое хранилище")
+        ContainerDb(file_service_db, "База данных", "PostgresSQL, AES-256", "База данных для хранения сканов \ документов пациентов")
+        System(s3_file_system, "Файловое хранилище", "Хранение отсканированных документов и Excel файлов в зашифрованном виде")
+        Rel(file_service, file_service_db, "Запись \ Чтение данных", "SQL \ TCP")
+        Rel(file_service, s3_file_system, "Запись \ Чтение файлов", "TCP")
+    }
+
+    note bottom of file_system
+        Сервис хранения документов и сканов в файловом хранилище
+        Срок хранения: 5 лет.
+        Хранение в БД в зашифрованном виде по алгоритму AES 256.
+        Шифрование при передачи - TLS
+        Шифрования данных перед помещением в файловое хранилище.
+        Токенезация файлов перед помещением в файловое хранилище
+        Доступ на основе ABAC.
+        - Администратор имеет полный доступ к информации
+        - Сотрудники имеют доступ к PII и PHI на основе ABAC, включая разграничение с привязкой пациентов к врачам.
+    end note
+
+    Container(web_doctor, "Веб портал для специалистов-медиков", "React")
+    Container(web_admin, "Веб портал сотрудника ресепшена", "React")
+
+    System(api_gateway, "API Gateway", "Kong")
+    System(ad, "Active Directory", "Software System")
+    System(keycloak, "Keycloak", "Software System")
+
+    SystemQueue(response_queue, "Kafka", "Очередь сообщений")
+
+    Rel(api_gateway, keycloak, "Авторизация, аутентификация пользователей", "HTTPS \ JSON")
+    Rel(keycloak, ad, "Информация о учетных записях сотрудников", "LDAP")
+
+    Rel_R(payment_service, response_queue, "Данные по оплатам после обфускации", "Async")
+    Rel_R(patient_service_system, response_queue, "Данные по клиентам после обфускации", "Async")
+    Rel_R(schedule_service_system, response_queue, "Данные записей на посещение клиентов после обфускации", "Async")
+
+    Rel_U(response_queue, crm_service, "Данные для crm", "Async")
+
+    Rel("api_gateway", schedule_service, "Информация о расписании и визитах пациентов", "HTTPS \ JSON")
+    Rel("api_gateway", medical_tests_service, "Информация о результатах анализа пациента", "HTTPS \ JSON")
+    Rel("api_gateway", patient_card_service, "Информация о медицинской карточке пациента", "HTTPS \ JSON")
+    Rel("api_gateway", crm_service, "Данные и аналитики о клиентах компании", "HTTPS \ JSON")
+    Rel("api_gateway", file_service, "Документы и сканы пациентов", "HTTPS \ JSON")
+
+    System_Boundary(bi_system, "BI система компании «Медикаменте»"){
+        Container(bi_service, "BI сервис", "PowerBi", "BI сервис")
+        ContainerDb(bi_service_db, "Хранилище данных", "ClickHouse", "Хранилище данных компании «Медикаменте»")
+        Rel(bi_service, bi_service_db, "Запись \ Чтение данных", "ODBC")
+    }
+
+    note bottom of bi_system
+        Сервис хранения документов и сканов в файловом хранилище
+        Срок хранения: 5 лет.
+        Хранение в БД в зашифрованном виде по алгоритму AES 256.
+        Шифрование при передачи - TLS
+        Шифрования данных перед помещением в файловое хранилище.
+        Токенезация файлов перед помещением в файловое хранилище
+        Доступ на основе ABAC.
+        - Администратор имеет полный доступ к информации
+        - Сотрудники имеют доступ на основе ABAC, включая разграничение с привязкой пациентов к врачам.
+    end note
+
+    System(data_integration, "Сервис сбора данных для аналитики", "Apache NiFi")
+    Container(data_anonimaser, "Сервис обезличивания данных", "Python")
+    Rel(data_integration, data_anonimaser, "Обезличивание данных", "HTTPS \ JSON")
+    Rel_U(response_queue, data_integration, "Данные для аналитики", "Async")
+    Rel_U(data_integration, bi_service, "Данные для аналитики", "HTTPS \ JSON")
+}
+
+Rel_D(ext_gateway, "api_gateway", "Оплаты, анализы, информация о посещениях врачей, в т.ч. записи к врачам, профиль пациента")
+Rel_D(api_gateway, patient_service, "Данные профиля пациента")
+Rel_D(ext_gateway, web_patient, "Интерфейс пациента", "HTTPS")
+Rel_D(patient, ext_gateway,  "Интерфейс пациента", "HTTPS \ JSON")
+
+Rel_D(cash, kkm_system, "Принятие оплаты", "TCP \ UI")
+Rel_D(kkm_system, 1_buch_system, "Информация о принятии денежных средств", "TCP \ IP-OLE")
+Rel_D(1_buch_system, 1_stock_system, "Процессинг платежей")
+
+Rel_U(buch, 1_buch_system, "Принятие оплаты", "TCP \ UI" )
+Rel_U(stock, 1_stock_system, "Учет ТМЦ", "TCP \ UI" )
+Rel(payment_service, payment_system, "Регистрация оплаты", "HTTPS \ JSON")
+Rel(payment_system, payment_service, "Информация о транзакции", "HTTPS \ JSON")
+Rel(payment_service, 1_buch_system, "Информация о оплате", "HTTPS \ JSON")
+
+Rel(patient, payment_system, "Оплата услуг", "HTTPS")
+
+Rel(api_gateway, payment_service, "Информация о оплаченных услугах пациента", "HTTPS \ JSON")
+
+Rel(doctor, web_doctor, "Просмотр записей пациентов, ведение медицинских карточек пациента, просмотр и регистрация результатов анализов", "HTTPS \ UI")
+Rel(administrator, web_admin, "Регистрация пациентов, просмотр журнала записи к специалистам, запись пациента к специалисту", "HTTPS \ UI")
+
+Rel(web_doctor, "api_gateway", "Расписание приемов, результаты анализов, карточки пациентов", "HTTPS \ JSON")
+Rel(web_admin, "api_gateway", "Регистрация пациентов, просмотр журнала записи к специалистам, запись пациента к специалисту", "HTTPS \ JSON")
+
+Rel(integration_medical_tests_service, lab, "Регистрация заявки на анализы, получение результатов анализов", "HTTPS \ JSON")
+
+@enduml
